@@ -1,0 +1,299 @@
+---
+title: "Causal Impact"
+output: html_notebook
+---
+
+### Import
+```{r}
+library("CausalImpact")
+library("Hmisc")
+```
+
+
+## Task 1
+Default model implementation: [https://github.com/google/CausalImpact/blob/master/R/impact_model.R](https://github.com/google/CausalImpact/blob/master/R/impact_model.R)
+
+They use Markov chain Monte Carlo algorithm to predict future values. <br>
+The default model used in the package is Local Level Model: <br>
+$y_t = \mu_t + \epsilon_t$, $\; \epsilon_t \sim N(0, \sigma^2)$ <br>
+$\mu_{t+1} = \mu_t + \eta_t$, $\; \eta_t \sim N(0, \tau^2)$ <br>
+
+The default model does not include a local linear trend component. Thus, if you think that your time series is trending, it is better to use an other model. You can add this and other components by defining a custom model. For example, you can use linear trend model. The local level model bases forecast around the average value of recent observations and the local linear trend model adds slopes as well. 
+
+More details: [http://www.unofficialgoogledatascience.com/2017/07/fitting-bayesian-structural-time-series.html](http://www.unofficialgoogledatascience.com/2017/07/fitting-bayesian-structural-time-series.html)
+
+## Task 2
+
+### Utils
+```{r}
+plotData <- function(test) {
+  matplot(test.y, type = "l")
+}
+```
+
+```{r}
+runTest <- function(test, args) {
+  test.data <- cbind(test.y, test.x)
+  return(CausalImpact(test.data, test.pre.period, test.post.period, model.args = args))
+}
+```
+
+### Setup periods
+```{r}
+test.n = 182
+test.pre.period <- c(1, 140)
+test.post.period <- c(141, 182)
+test.post.range <- c(141 : 182)
+```
+
+### Example 1
+
+When the data is not really stable it's better to set ```prior.level.sd``` parameter.
+```{r}
+set.seed(1)
+
+test.x <- 100 + 2 * arima.sim(model = list(0, 0, 0), n = test.n)
+test.y <- 1.2 * test.x + rnorm(test.n)
+
+plotData(test)
+```
+```{r}
+impact <- runTest(test, list())
+plot(impact)
+summary(impact)
+```
+```{r}
+impact <- runTest(test, list(prior.level.sd = 0.5))
+plot(impact)
+summary(impact)
+```
+
+### Example 2
+
+When the data is stable it's better to avoid ```prior.level.sd``` parameter (make this parameter small).
+```{r}
+set.seed(1)
+
+test.x <- 100 + 2 * arima.sim(model = list(1, 2, 3), n = test.n)
+test.y <- 1.2 * test.x
+test.y[test.post.range] <- test.y[test.post.range] + 1
+
+plotData(test)
+```
+
+```{r}
+impact <- runTest(test, list(prior.level.sd = 0.5))
+plot(impact)
+summary(impact)
+```
+
+```{r}
+impact <- runTest(test, list())
+plot(impact)
+summary(impact)
+```
+
+### Example 3
+When the data is seasonal it's better to set ```nseasons``` parameter. <br>
+For example, if the data represent daily observations, use 7 for a day-of-week component.
+
+```{r}
+set.seed(1)
+
+test.x <- 100 + 2 * arima.sim(model = list(1, 1, 1), n = test.n)
+test.y <- test.x + 5 * c(1 : test.n) %% 7
+test.y[test.post.range] <- test.y[test.post.range] + 1
+
+plotData(test)
+```
+```{r}
+impact <- runTest(test, list())
+plot(impact)
+summary(impact)
+```
+```{r}
+impact <- runTest(test, list(nseasons = 7, season.duration = 1))
+plot(impact)
+summary(impact)
+```
+
+### Example 4
+When the variance is changing it's better to set ```dynamic.regression``` parameter.
+```{r}
+set.seed(1)
+
+test.x <- 100 + 2 * arima.sim(model = list(1, 1, 1), n = test.n)
+test.y <- test.x + 0.02 * rnorm(test.n) * c(1 : test.n)
+
+plotData(test)
+```
+```{r}
+impact <- runTest(test, list())
+plot(impact)
+summary(impact)
+```
+```{r}
+impact <- runTest(test, list(dynamic.regression = TRUE))
+plot(impact)
+summary(impact)
+```
+
+## Task 3
+
+### Approach 1
+**Idea**: Let's look at competitors. <br>
+**Target**: Users' search activity in Yandex. <br>
+**Predictor**: Users' search activity in another search engine.
+
+**Advantages**
+
+* There are a few different search engines. So we have more predictors.
+
+**Disadvantages**
+
+* These companies will not give us their data.
+* Possibly some of these companies have improved their images search engines too.
+
+**Possible solutions**
+
+* We can buy this information if we really need it.
+* We can conduct a survey of our users.
+
+### Approach 2
+**Idea**: Users use search engines to find other web resources. Let's look at their statistics and find the proportion of users who use Yandex. <br>
+**Target**: Users' search activity in Yandex. <br>
+**Predictor**: The proportion of users who use Yandex to find another web resource.
+
+**Advantages**
+
+* There are a lot of web resources.
+
+**Disadvantages**
+
+* Statistics of one web resource are not significant.
+
+**Possible solutions**
+
+* Use the statistics of many web resources.
+
+## Task 4
+
+### Read data
+```{r}
+data <- read.csv("data.csv", sep=",")
+campaigns <- read.csv("campaigns.csv", sep=",")
+```
+
+### Setup experiment
+We can skip first 455 days because they are affected by other campaigns related to our service.
+```{r}
+experiment.start <- 456
+experiment.end <- 796
+experiment.campaign.start <- 592
+experiment.campaign.end <- 713
+
+data <- data[c(1 : experiment.end), ]
+```
+
+### Filter campaigns
+```{r}
+filterCampaigns <- function(campaigns, start_date, end_date) {
+  return(campaigns[campaigns$start_date >= start_date & campaigns$start_date <= end_date,])
+}
+
+campaigns <- filterCampaigns(campaigns, experiment.campaign.start, experiment.campaign.end)
+campaigns
+```
+Because a lot of campaigns intersect, I suggest to divide them into 2 groups:
+
+* group 1 --  campaigns with numbers 25 to 29 (start date = 623, end date = 668)
+* group 2 --  campaigns with numbers 30 to 34 (start date = 690, end date = 730)
+
+### Analysis
+
+#### Data analysis
+Is data seasonal? <br>
+```2015-01-01``` - it's a Monday (day number 380) <br>
+Looks like data is seasonal...
+```{r}
+plot(data$target[380 : 401], type = "l")
+```
+
+#### Features analysis
+Let's look at the correlation between the target and other features (from day 456 to day 591).
+```{r}
+features.names <- colnames(data[, c(3 : ncol(data))])
+
+df <- data.frame(matrix(ncol = 2, nrow = 0))
+colnames(df) <- c("feature", "correlation")
+
+for (feature in features.names) {
+  values <- data[, feature]
+  indices <- !is.na(values)
+  target <- data$target[indices][experiment.start : experiment.campaign.start - 1]
+  predictor <-  as.numeric(values[indices])[experiment.start : experiment.campaign.start - 1]
+  
+  # correlation before our campaigns
+  correlation <- cor(target, predictor)
+  df[nrow(df) + 1, ] <- list(feature, correlation)
+}
+
+features.corr <- df
+```
+
+Let's find features with strong correlation and which are ```maybe not affected``` by campaigns. <br>
+I think that it is a good choice for predictors because people who created this data should know more about the nature of this data than me.
+```{r}
+features.corr[features.corr$correlation > 0.6 & startsWith(features.corr$feature, "may"),]
+```
+
+#### Prediction
+All previous campaigns finished before day 600. <br>
+Let's check that we can use these predictors to predict the target. <br>
+
+```{r}
+test.data <- cbind(data$target,
+                   data$may_be_not_impacted_7,
+                   data$may_be_not_impacted_9)
+
+test.pre.period <- c(experiment.start, 599)
+test.post.period <- c(600, 622)
+
+impact <- CausalImpact(test.data,
+                       test.pre.period,
+                       test.post.period,
+                       model.args = list(nseasons = 7, prior.level.sd = 0.1))
+plot(impact)
+summary(impact)
+```
+It looks like we can use these predictors to predict the target.
+
+#### Group 1
+```{r}
+test.pre.period <- c(experiment.start, 622)
+test.post.period <- c(623, 668)
+
+impact <- CausalImpact(test.data,
+                       test.pre.period,
+                       test.post.period,
+                       model.args = list(nseasons = 7, prior.level.sd = 0.1))
+plot(impact)
+summary(impact)
+```
+
+#### Group 2
+```{r}
+test.pre.period <- c(experiment.start, 689)
+test.post.period <- c(690, 730)
+
+impact <- CausalImpact(test.data,
+                       test.pre.period,
+                       test.post.period,
+                       model.args = list(nseasons = 7, prior.level.sd = 0.1))
+plot(impact)
+summary(impact)
+```
+
+### Conclusion
+So we can conclude that the first group of campaigns definitely affect the target. <br>
+The second group doesn't affect the target so much.
