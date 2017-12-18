@@ -1,0 +1,17 @@
+#feedback {
+    width: 600px;
+    margin-bottom: 5px
+}
+
+.rating {
+    margin-top: 20px;
+    font-size: 30px
+}
+
+.red {
+    color: red
+}
+
+.green {
+    color: green
+}
